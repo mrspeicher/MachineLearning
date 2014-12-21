@@ -1,0 +1,218 @@
+---
+title: "Coursera Machine Learning Project"
+author: "Mark Speicher"
+date: "Sunday, December 21, 2014"
+output: html_document
+---
+Practical Machine Learning Project
+------------------------------------------------------------------------------------
+**Problem**
+
+*Note*
+This documentation provides information and R code for the course project for the Coursera course, "Practical Machine Learning," offered through Johns Hopkins University.
+
+*Background* 
+(from the *Coursera* course site here: https://class.coursera.org/predmachlearn-016/human_grading/view/courses/973763/assessments/4/submissions)
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Data Sources
+-----------------------------------------------------------------------------------
+
+The training data for this project were downloaded from:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data were downloaded from:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Data source: http://groupware.les.inf.puc-rio.br/har
+
+Intended results
+------------------------------------------------------------------------------------
+*Goals*
+The goal of the project is to predict the manner in which the subjects did the exercise. This is the “classe” variable in the training set. Any of the other variables may be used to predict with. I then used the prediction model to predict 20 different test cases.
+
+*Submission*
+The resulting submission should consist of a link to a Github repo with the R markdown and compiled HTML files describing this analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. 
+
+According to the instructions, "You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details."
+
+Getting the Data
+------------------------------------------------------------------------------------
+In the code below, the data is downloaded directly from the URL provided. You will also need to install and load a number of R packages in order to reproduce this analysis from the code provided.
+
+```{r}
+## Begin by loading the required packages
+## If they are not installed in your system then install them from Cran-R 
+## using install.packages('package_name')
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(e1071)
+library(randomForest)
+
+## Get the data from the URLs in the assignment and set the NA variables to NA
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+
+```
+
+Partitioning the Data
+------------------------------------------------------------------------------------
+It is customary to use the training data for both training the algorithm and testing the method chosen; the code is then applied to the actual testing set. In this case, I used 60% of the original training set for training, and the other 40% for testing.
+
+```{r}
+## Particion the training data set for 60% training 40% testing
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]; myTesting <- training[-inTrain, ]
+dim(myTraining); dim(myTesting)
+## You should have 11,776 cases in training and 7,846 in testing
+
+```
+
+Cleaning the Data
+------------------------------------------------------------------------------------
+In the code below, the data is tidied using the methods described.
+
+```{r}
+
+## Clean the data
+
+## Because the file is so big we will look for variables with
+## Near-zero variances
+myDataNZV <- nearZeroVar(myTraining, saveMetrics=TRUE)
+
+## Take a look
+myNZVvars <- names(myTraining) %in% c("new_window", "kurtosis_roll_belt", "kurtosis_picth_belt", "kurtosis_yaw_belt", "skewness_roll_belt", "skewness_roll_belt.1", "skewness_yaw_belt", "max_yaw_belt", "min_yaw_belt", "amplitude_yaw_belt", "avg_roll_arm", "stddev_roll_arm", "var_roll_arm", "avg_pitch_arm", "stddev_pitch_arm", "var_pitch_arm", "avg_yaw_arm", "stddev_yaw_arm", "var_yaw_arm", "kurtosis_roll_arm", "kurtosis_picth_arm", "kurtosis_yaw_arm", "skewness_roll_arm", "skewness_pitch_arm", "skewness_yaw_arm",                     "max_roll_arm", "min_roll_arm", "min_pitch_arm", "amplitude_roll_arm", "amplitude_pitch_arm", "kurtosis_roll_dumbbell", "kurtosis_picth_dumbbell", "kurtosis_yaw_dumbbell", "skewness_roll_dumbbell", "skewness_pitch_dumbbell", "skewness_yaw_dumbbell", "max_yaw_dumbbell", "min_yaw_dumbbell", "amplitude_yaw_dumbbell", "kurtosis_roll_forearm", "kurtosis_picth_forearm", "kurtosis_yaw_forearm", "skewness_roll_forearm", "skewness_pitch_forearm", "skewness_yaw_forearm", "max_roll_forearm", "max_yaw_forearm", "min_roll_forearm", "min_yaw_forearm", "amplitude_roll_forearm", "amplitude_yaw_forearm", "avg_roll_forearm", "stddev_roll_forearm", "var_roll_forearm", "avg_pitch_forearm", "stddev_pitch_forearm", "var_pitch_forearm", "avg_yaw_forearm", "stddev_yaw_forearm", "var_yaw_forearm")
+
+myTraining <- myTraining[!myNZVvars]
+
+## To check the new number of observations
+dim(myTraining)
+## You should now have 100 variables for each case where before you had 160
+
+## Eliminate the ID numbers as they will mess up the correlations
+myTraining <- myTraining[c(-1)]
+
+## Get rid of the variables with too many NAs in the set
+trainingV3 <- myTraining #creating another subset to iterate in loop
+for(i in 1:length(myTraining)) { #for every column in the training dataset
+  if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .6 ) { #if n?? NAs > 60% of total observations
+    for(j in 1:length(trainingV3)) {
+      if( length( grep(names(myTraining[i]), names(trainingV3)[j]) ) ==1)  { #if the columns are the same:
+        trainingV3 <- trainingV3[ , -j] #Remove that column
+      }   
+    } 
+  }
+}
+
+## To check the new N again
+dim(trainingV3)
+## You should have 58 variables now rather than 60
+
+## We're done cleaning the myTraining training set so let's
+## Set it back to the original name and clean up our extra sets:
+myTraining <- trainingV3
+rm(trainingV3)
+
+## Clean up the other sets using the same procedure
+## On the MyTraining testing set and the actual testing set
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58]) # already with classe column removed
+myTesting <- myTesting[clean1]
+testing <- testing[clean2]
+
+## Check the new N
+dim(myTesting)
+dim(testing)
+
+## Coerce the data to the same type to work with the trees software
+for (i in 1:length(testing) ) {
+  for(j in 1:length(myTraining)) {
+    if( length( grep(names(myTraining[i]), names(testing)[j]) ) ==1)  {
+      class(testing[j]) <- class(myTraining[i])
+    }      
+  }      
+}
+
+## And to make sure Coertion really worked, simple smart ass technique:
+testing <- rbind(myTraining[2, -58] , testing) # remove row 2 as it means nothing anything
+testing <- testing[-1,]
+
+```
+
+Analysis
+------------------------------------------------------------------------------------
+Two methods are described below for the analysis, with a comparison to determine the superior predictive method. We try the decision tree on the training partition of the training set.
+
+```{r}
+## First, use the decision tree algorithm to 
+## identify the groupings of teh variables for predictions
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+
+## Take a look at the graph
+fancyRpartPlot(modFitA1)
+
+
+```
+
+Decision Tree Plot
+
+```{r, echo=FALSE}
+fancyRpartPlot(modFitA1)
+
+```
+Predictions and Cross-Validation
+------------------------------------------------------------------------------------
+*Decision Tree*
+Initially, a decision-tree model was used for the predictive algorithm on the training set. To check the internal cross-validation, we use the model on the testing particion of the training set. Decision trees are commonly used with large data sets and this analysis gave good results.
+
+```{r}
+## Now do the predictions on myTesting set
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+
+## Use confusionMatrix to test the results
+confusionMatrix(predictionsA1, myTesting$classe)
+## Take a look at your results - overall accuracy should be
+## 0.8663 (95% CI 0.08586 - 0.08738)
+
+```
+*Random Forest Model*
+Now we try a random forest model, due to its ability to balance errors in unbalanced datasets, both on the training partition then on the testing partition of the training set.
+
+```{r}
+## Let's compare to another method: Random Forest groupings
+modFitB1 <- randomForest(classe ~. , data=myTraining)
+predictionsB1 <- predict(modFitB1, myTesting, type = "class")
+confusionMatrix(predictionsB1, myTesting$classe)
+## Wow! Much better - overall accuracy is
+## 0.9985 (95% CI 0.9973, 0.9992)
+
+```
+*Results*
+The random forest model was superior in accuracy and internal cross-validation. We now use it to predict the testing set.
+
+## So now we work on the actual testing set
+predictionsB2 <- predict(modFitB1, testing, type = "class")
+
+## And we do our output files (hoping they are right!)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictionsB2)
+```
